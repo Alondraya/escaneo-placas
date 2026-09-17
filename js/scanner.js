@@ -14,8 +14,6 @@ const Scanner = (() => {
   const overlay = document.getElementById("ocrOverlay");
   const ocrStatus = document.getElementById("ocrStatus");
 
-  const COLOR_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- ";
-
   async function startCamera() {
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -57,52 +55,11 @@ const Scanner = (() => {
 
   function captureFrame() {
     if (!isActive || !video.videoWidth) return null;
-    const maxW = 1280;
-    const scale = Math.min(1, maxW / video.videoWidth);
-    canvas.width = Math.round(video.videoWidth * scale);
-    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return cropPlateRegion(ctx);
-  }
-
-  function cropPlateRegion(ctx) {
-    // Recorta la región central/inferior donde normalmente va la placa
-    const w = ctx.canvas.width;
-    const h = ctx.canvas.height;
-    let cx = w * 0.5;
-    let cy = h * 0.5;
-    let pw = w * 0.85;
-    let ph = h * 0.35;
-    const sx = Math.max(0, Math.round(cx - pw / 2));
-    const sy = Math.max(0, Math.round(cy - ph / 2));
-    const sw = Math.min(w - sx, Math.round(pw));
-    const sh = Math.min(h - sy, Math.round(ph));
-    const data = ctx.getImageData(sx, sy, sw, sh);
-
-    const out = document.createElement("canvas");
-    out.width = sw * 2;
-    out.height = sh * 2;
-    const octx = out.getContext("2d");
-    const temp = document.createElement("canvas");
-    temp.width = sw;
-    temp.height = sh;
-    const tctx = temp.getContext("2d");
-    tctx.putImageData(preprocess(data), 0, 0);
-    octx.imageSmoothingEnabled = true;
-    octx.drawImage(temp, 0, 0, out.width, out.height);
-    return out.toDataURL("image/png");
-  }
-
-  function preprocess(imageData) {
-    const d = imageData.data;
-    for (let i = 0; i < d.length; i += 4) {
-      let r = d[i], g = d[i + 1], b = d[i + 2];
-      let gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-      gray = gray < 128 ? Math.max(0, gray - 30) : Math.min(255, gray + 30);
-      d[i] = d[i + 1] = d[i + 2] = gray;
-    }
-    return imageData;
+    return canvas.toDataURL("image/png");
   }
 
   async function ensureWorker() {
@@ -116,7 +73,7 @@ const Scanner = (() => {
       },
     });
     await worker.setParameters({
-      tessedit_char_whitelist: COLOR_WHITELIST,
+      tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
       preserve_interword_spaces: "0",
     });
     return worker;
@@ -134,8 +91,23 @@ const Scanner = (() => {
     try {
       const w = await ensureWorker();
       ocrStatus.textContent = "Leyendo placa...";
-      const { data } = await w.recognize(dataUrl);
-      const texto = cleanText(data.text);
+
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((r) => (img.onload = r));
+
+      const cropCanvas = document.createElement("canvas");
+      const cw = img.width;
+      const ch = Math.round(img.height * 0.35);
+      const cy = Math.round(img.height * 0.35);
+      cropCanvas.width = cw;
+      cropCanvas.height = ch;
+      const cctx = cropCanvas.getContext("2d");
+      cctx.drawImage(img, 0, cy, cw, ch, 0, 0, cw, ch);
+
+      const enhanced = enhanceForOCR(cropCanvas);
+      const { data } = await w.recognize(enhanced.toDataURL("image/png"));
+      const texto = cleanPlateText(data.text);
       overlay.classList.remove("visible");
       return texto;
     } catch (e) {
@@ -145,11 +117,48 @@ const Scanner = (() => {
     }
   }
 
-  function cleanText(raw) {
-    let t = raw.toUpperCase().replace(/[^A-Z0-9\- ]/g, "");
-    t = t.replace(/[IV]{1,3}\s+/g, "");
-    t = t.replace(/\s+/g, "-");
-    t = t.replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
+  function enhanceForOCR(srcCanvas) {
+    const w = srcCanvas.width;
+    const h = srcCanvas.height;
+    const out = document.createElement("canvas");
+    out.width = w * 2;
+    out.height = h * 2;
+    const ctx = out.getContext("2d");
+
+    ctx.filter = "contrast(1.8) brightness(1.1)";
+    ctx.drawImage(srcCanvas, 0, 0, out.width, out.height);
+    ctx.filter = "none";
+
+    const imgData = ctx.getImageData(0, 0, out.width, out.height);
+    const d = imgData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const gray = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+      const bw = gray > 140 ? 255 : 0;
+      d[i] = d[i + 1] = d[i + 2] = bw;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return out;
+  }
+
+  function cleanPlateText(raw) {
+    let t = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (t.length > 8) t = t.substring(0, 8);
+    if (t.length >= 3) {
+      const patterns = [
+        /^([A-Z]{3})(\d{3})$/,
+        /^([A-Z]{3})(\d{2})$/,
+        /^([A-Z]{3})(\d{4})$/,
+        /^([A-Z]{2,4})(\d{2,4})$/,
+      ];
+      for (const p of patterns) {
+        const m = t.match(p);
+        if (m) return m[1] + "-" + m[2];
+      }
+    }
+    if (t.length >= 3) {
+      const mid = Math.ceil(t.length / 2);
+      return t.substring(0, mid) + "-" + t.substring(mid);
+    }
     return t;
   }
 
@@ -163,9 +172,11 @@ const Scanner = (() => {
     btnRetry.style.display = "inline-block";
     wrap.classList.remove("scanning");
     if (placa) {
-      showToast("Placa detectada: " + placa);
+      showToast("Placa detectada: " + placa + " (corrígela si es necesario)");
+      inpPlaca.focus();
+      inpPlaca.select();
     } else {
-      showToast("No se pudo leer la placa. Corrígela manualmente.", true);
+      showToast("No se pudo leer la placa. Escríbela manualmente.", true);
       inpPlaca.focus();
     }
   }
