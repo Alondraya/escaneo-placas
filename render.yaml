@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: escaneo-placas
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server/server.js
+    envVars:
+      - key: DB_PATH
+        value: /data/placas.db
+    disk:
+      mountPath: /data
+      sizeGB: 1

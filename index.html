@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0">
+<title>Control de Placas - Escaneo Vehicular</title>
+<meta name="description" content="Registro y control de placas vehiculares con cámara, ocupantes y dashboard estadístico.">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Placas">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <span class="logo">🚓</span>
+    <div>
+      <h1>Sistema de Escaneo de Placas</h1>
+      <p id="userGreeting">Registro y control vehicular</p>
+      <span id="connStatus" class="conn-status">⏳ Conectando...</span>
+    </div>
+  </div>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="scan" id="tabScan">📸 Escanear / Registrar</button>
+    <button class="tab-btn" data-tab="dashboard" id="tabDashboard">📊 Dashboard</button>
+    <button id="btnInstall" class="btn btn-install" style="display:none;">⬇️ Instalar App</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- =================== PANEL ESCANEO / REGISTRO =================== -->
+  <section id="view-scan" class="view active">
+
+    <div class="grid-2">
+      <!-- Columna cámara -->
+      <div class="card camera-card">
+        <h2>📷 Captura de Placa</h2>
+        <div class="video-wrap">
+          <video id="video" autoplay playsinline></video>
+          <canvas id="captureCanvas" style="display:none;"></canvas>
+          <div id="cameraPlaceholder" class="camera-placeholder">
+            <p>🎥 Activa la cámara para escanear la placa</p>
+          </div>
+          <div id="ocrOverlay" class="ocr-overlay">
+            <div class="spinner"></div>
+            <p id="ocrStatus">Analizando placa...</p>
+          </div>
+        </div>
+        <div class="camera-controls">
+          <button id="btnStream" class="btn btn-secondary">🔴 Activar Cámara</button>
+          <button id="btnCapture" class="btn btn-primary" disabled>📸 Capturar Placa</button>
+          <button id="btnRetry" class="btn btn-secondary" style="display:none;">🔄 Re-Escanear</button>
+        </div>
+        <p class="hint">⚠️ Si la cámara no reconoce bien la placa, puedes corregirla manualmente en el campo.</p>
+      </div>
+
+      <!-- Columna formulario -->
+      <div class="card form-card">
+        <h2>🚗 Datos del Registro</h2>
+
+        <label class="field">
+          <span>Placa del Vehículo *</span>
+          <input type="text" id="inpPlaca" placeholder="Ej: ABC-123" maxlength="12" autocomplete="off">
+          <small class="field-msg" id="placaMsg"></small>
+        </label>
+
+        <div class="grid-2">
+          <label class="field">
+            <span>Tipo de Vehículo *</span>
+            <select id="selTipo">
+              <option value="">-- Seleccione --</option>
+              <option>Moto</option>
+              <option>Carro (Sedan)</option>
+              <option>SUV / Camioneta</option>
+              <option>Camión</option>
+              <option>Bus / Van</option>
+              <option>Encava</option>
+              <option>Iveco</option>
+              <option>Otro</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Vehículo (Marca / Modelo) *</span>
+            <input type="text" id="inpVehiculo" placeholder="Ej: Toyota Corolla" list="listaVehiculos" autocomplete="off">
+            <datalist id="listaVehiculos"></datalist>
+          </label>
+        </div>
+
+        <label class="field" id="fieldTipoOtro" style="display:none;">
+          <span>Especifique el tipo de vehículo *</span>
+          <input type="text" id="inpTipoOtro" placeholder="Escriba el tipo de vehículo" autocomplete="off">
+        </label>
+
+        <div class="grid-2">
+          <label class="field">
+            <span>Estado de Venezuela *</span>
+            <select id="selEstado">
+              <option value="">-- Seleccione el estado --</option>
+              <option>Amazonas</option>
+              <option>Anzoátegui</option>
+              <option>Apure</option>
+              <option>Aragua</option>
+              <option>Barinas</option>
+              <option>Bolívar</option>
+              <option>Carabobo</option>
+              <option>Cojedes</option>
+              <option>Delta Amacuro</option>
+              <option>Distrito Capital</option>
+              <option>Falcón</option>
+              <option>Guárico</option>
+              <option>La Guaira</option>
+              <option>Lara</option>
+              <option>Mérida</option>
+              <option>Miranda</option>
+              <option>Monagas</option>
+              <option>Nueva Esparta</option>
+              <option>Portuguesa</option>
+              <option>Sucre</option>
+              <option>Táchira</option>
+              <option>Trujillo</option>
+              <option>Yaracuy</option>
+              <option>Zulia</option>
+            </select>
+          </label>
+          <div class="field">
+            <span>Hora / Fecha / Día (automático)</span>
+            <div class="datetime-box" id="boxDateTime">
+              <span class="big-time">--:--</span>
+              <span class="big-date">--/--/---- · ---</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <label class="field">
+            <span>Responsable de la Unidad (Vehículo) *</span>
+            <input type="text" id="inpResponsable" placeholder="Nombre del responsable del vehículo" list="listaResponsables" autocomplete="off">
+            <datalist id="listaResponsables"></datalist>
+          </label>
+          <label class="field">
+            <span>Quién lo Registra *</span>
+            <input type="text" id="inpRegistrador" placeholder="Nombre del operador" list="listaRegistradores" autocomplete="off">
+            <datalist id="listaRegistradores"></datalist>
+          </label>
+        </div>
+
+        <h3 class="subtitle">👥 Ocupantes del Vehículo</h3>
+        <div class="persons-grid">
+          <div class="person-counter" data-color="man">
+            <span class="pico">👨</span>
+            <strong>Adultos</strong>
+            <div class="counter">
+              <button class="minus" data-field="adultosHombres">−</button>
+              <input type="number" id="adultosHombres" value="0" min="0" readonly>
+              <button class="plus" data-field="adultosHombres">+</button>
+            </div>
+            <span class="plabel">Hombres</span>
+          </div>
+          <div class="person-counter" data-color="woman">
+            <span class="pico">👩</span>
+            <strong>Adultas</strong>
+            <div class="counter">
+              <button class="minus" data-field="adultosMujeres">−</button>
+              <input type="number" id="adultosMujeres" value="0" min="0" readonly>
+              <button class="plus" data-field="adultosMujeres">+</button>
+            </div>
+            <span class="plabel">Mujeres</span>
+          </div>
+          <div class="person-counter" data-color="boy">
+            <span class="pico">👦</span>
+            <strong>Niños</strong>
+            <div class="counter">
+              <button class="minus" data-field="ninos">−</button>
+              <input type="number" id="ninos" value="0" min="0" readonly>
+              <button class="plus" data-field="ninos">+</button>
+            </div>
+            <span class="plabel">Niños</span>
+          </div>
+          <div class="person-counter" data-color="girl">
+            <span class="pico">👧</span>
+            <strong>Niñas</strong>
+            <div class="counter">
+              <button class="minus" data-field="ninas">−</button>
+              <input type="number" id="ninas" value="0" min="0" readonly>
+              <button class="plus" data-field="ninas">+</button>
+            </div>
+            <span class="plabel">Niñas</span>
+          </div>
+        </div>
+
+        <div class="persons-total" id="personsTotal">Total de personas: <b>0</b></div>
+
+        <button id="btnSave" class="btn btn-save">💾 Guardar Registro</button>
+        <div id="saveMsg" class="save-msg"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================== PANEL DASHBOARD =================== -->
+  <section id="view-dashboard" class="view">
+
+    <div class="stats-row">
+      <div class="stat-card primary">
+        <span class="stat-icon">🚘</span>
+        <div><span class="stat-num" id="statTotalPlacas">0</span><span class="stat-label">Placas Registradas</span></div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-icon">👥</span>
+        <div><span class="stat-num" id="statTotalPersonas">0</span><span class="stat-label">Personas Totales</span></div>
+      </div>
+      <div class="stat-card man">
+        <span class="stat-icon">👨</span>
+        <div><span class="stat-num" id="statHombres">0</span><span class="stat-label">Hombres</span></div>
+      </div>
+      <div class="stat-card woman">
+        <span class="stat-icon">👩</span>
+        <div><span class="stat-num" id="statMujeres">0</span><span class="stat-label">Mujeres</span></div>
+      </div>
+      <div class="stat-card boy">
+        <span class="stat-icon">👦</span>
+        <div><span class="stat-num" id="statNinos">0</span><span class="stat-label">Niños</span></div>
+      </div>
+      <div class="stat-card girl">
+        <span class="stat-icon">👧</span>
+        <div><span class="stat-num" id="statNinas">0</span><span class="stat-label">Niñas</span></div>
+      </div>
+    </div>
+
+    <div class="chart-row">
+      <div class="card chart-card">
+        <h2>📊 Registros por Tipo de Vehículo</h2>
+        <div class="chart-box"><canvas id="chartTipo"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <h2>👥 Personas por Categoría</h2>
+        <div class="chart-box"><canvas id="chartPersonas"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card chart-card">
+      <h2>🚙 Registros por Vehículo</h2>
+      <div class="chart-box"><canvas id="chartVehiculo"></canvas></div>
+    </div>
+
+    <div class="card chart-card">
+      <h2>🗺️ Registros por Estado de Venezuela</h2>
+      <div class="chart-box"><canvas id="chartEstado"></canvas></div>
+    </div>
+
+    <div id="chartAviso" class="chart-aviso" style="display:none;">⚠️ Los gráficos no se muestran porque Chart.js no pudo cargar (revisa tu conexión a internet). Las estadísticas y la tabla sí están disponibles.</div>
+
+    <div class="card filter-card">
+      <h2>📋 Detalle de Registros</h2>
+      <div class="filters">
+        <input type="text" id="filtroBusqueda" placeholder="🔎 Buscar placa, vehículo u operador...">
+        <select id="filtroTipo">
+          <option value="">Todos los tipos</option>
+          <option>Moto</option>
+          <option>Carro (Sedan)</option>
+          <option>SUV / Camioneta</option>
+          <option>Camión</option>
+          <option>Bus / Van</option>
+          <option>Encava</option>
+          <option>Iveco</option>
+          <option>Otro</option>
+        </select>
+        <select id="filtroEstado">
+          <option value="">Todos los estados</option>
+          <option>Amazonas</option>
+          <option>Anzoátegui</option>
+          <option>Apure</option>
+          <option>Aragua</option>
+          <option>Barinas</option>
+          <option>Bolívar</option>
+          <option>Carabobo</option>
+          <option>Cojedes</option>
+          <option>Delta Amacuro</option>
+          <option>Distrito Capital</option>
+          <option>Falcón</option>
+          <option>Guárico</option>
+          <option>La Guaira</option>
+          <option>Lara</option>
+          <option>Mérida</option>
+          <option>Miranda</option>
+          <option>Monagas</option>
+          <option>Nueva Esparta</option>
+          <option>Portuguesa</option>
+          <option>Sucre</option>
+          <option>Táchira</option>
+          <option>Trujillo</option>
+          <option>Yaracuy</option>
+          <option>Zulia</option>
+        </select>
+        <input type="date" id="filtroDesde">
+        <span class="sep">a</span>
+        <input type="date" id="filtroHasta">
+        <button id="btnExportCsv" class="btn btn-secondary">⬇️ Exportar CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table id="tablaRegistros">
+          <thead>
+            <tr>
+              <th>Placa</th>
+              <th>Tipo</th>
+              <th>Vehículo</th>
+              <th>Estado</th>
+              <th>Hombres</th>
+              <th>Mujeres</th>
+              <th>Niños</th>
+              <th>Niñas</th>
+              <th>Total</th>
+              <th>Responsable</th>
+              <th>Operador</th>
+              <th>Fecha</th>
+              <th>Hora</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tbodyRegistros"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="app-footer">
+  Sistema de Escaneo de Placas · Datos compartidos en tiempo real (SQLite) entre PC y móvil
+</footer>
+
+<div id="toast" class="toast"></div>
+
+<script src="js/storage.js"></script>
+<script src="js/scanner.js"></script>
+<script src="js/app.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/pwa.js"></script>
+</body>
+</html>

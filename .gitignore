@@ -1,0 +1,5 @@
+node_modules/
+server/placas.db
+.env
+.DS_Store
+Thumbs.db
