@@ -14,12 +14,6 @@ if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-// Crear directorio de la base de datos si no existe
-const dbDir = path.dirname(DB_FILE);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-
 // ================= BASE DE DATOS =================
 const db = new DatabaseSync(DB_FILE);
 db.exec(`
